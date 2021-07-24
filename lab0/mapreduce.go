@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"container/list"
 	"encoding/json"
 	"hash/fnv"
 	"io/ioutil"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"sort"
 	"strconv"
 	"sync"
 )
@@ -98,6 +100,7 @@ func (c *MRCluster) worker() {
 					fs[i], bs[i] = CreateFileAndBuf(rpath)
 				}
 				results := t.mapF(t.mapFile, string(content))
+				//log.Printf("results: %s\n", results)
 				for _, kv := range results {
 					enc := json.NewEncoder(bs[ihash(kv.Key)%t.nReduce])
 					if err := enc.Encode(&kv); err != nil {
@@ -108,11 +111,60 @@ func (c *MRCluster) worker() {
 					SafeClose(fs[i], bs[i])
 				}
 			} else {
+				// else -> reduce phase
+
 				// YOUR CODE HERE :)
 				// hint: don't encode results returned by ReduceF, and just output
 				// them into the destination file directly so that users can get
 				// results formatted as what they want.
-				panic("YOUR CODE HERE")
+				//panic("YOUR CODE HERE")
+
+				kvList := make(map[string]*list.List)
+				for i := 0; i < t.nMap; i++ {
+					rPath := reduceName(t.dataDir, t.jobName, i, t.taskNumber)
+					log.Printf("do reduce: read %s\n", rPath)
+					content, err := os.Open(rPath)
+					if err != nil {
+						panic(err)
+					}
+					dec := json.NewDecoder(content)
+					for {
+						var kv KeyValue
+						err := dec.Decode(&kv)
+						if err != nil {
+							break
+						}
+						_, ok := kvList[kv.Key]
+						if !ok {
+							kvList[kv.Key] = list.New()
+						}
+						kvList[kv.Key].PushBack(kv.Value)
+						//log.Printf("key: %s  value: %s\n", kv.Key, kv.Value)
+					}
+				}
+				var keys []string
+				for key := range kvList {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				mPath := mergeName(t.dataDir, t.jobName, t.taskNumber)
+				fs, bs := CreateFileAndBuf(mPath)
+				//enc := json.NewEncoder(bs)
+				for _, key := range keys {
+					cnt := kvList[key].Len()
+					kvs := make([]string, cnt)
+					var i = 0
+					for e := kvList[key].Front(); e != nil; e = e.Next() {
+						kvs[i] = e.Value.(string)
+						//log.Printf("%v\n", e.Value)
+						i++
+					}
+					res := t.reduceF(key, kvs)
+					//log.Println(res)
+					//enc.Encode(KeyValue{key, res})
+					bs.WriteString(res)
+				}
+				SafeClose(fs, bs)
 			}
 			t.wg.Done()
 		case <-c.exit:
@@ -159,7 +211,33 @@ func (c *MRCluster) run(jobName, dataDir string, mapF MapF, reduceF ReduceF, map
 
 	// reduce phase
 	// YOUR CODE HERE :D
-	panic("YOUR CODE HERE")
+	//panic("YOUR CODE HERE")
+
+	reduceTasks := make([]*task, 0, nReduce)
+	resFiles := make([]string, nReduce)
+	for i := 0; i < nReduce; i++ {
+		t := &task{
+			dataDir:    dataDir,
+			jobName:    jobName,
+			phase:      reducePhase,
+			taskNumber: i,
+			nMap:       nMap,
+			nReduce:    nReduce,
+			reduceF:    reduceF,
+		}
+		t.wg.Add(1)
+		reduceTasks = append(reduceTasks, t)
+		resFiles[i] = mergeName(t.dataDir, t.jobName, t.taskNumber)
+		go func() {
+			c.taskCh <- t
+			//notify <- mergeName(t.dataDir, t.jobName, t.taskNumber)
+		}()
+	}
+	for _, t := range reduceTasks {
+		t.wg.Wait()
+	}
+	notify <- resFiles
+
 }
 
 func ihash(s string) int {

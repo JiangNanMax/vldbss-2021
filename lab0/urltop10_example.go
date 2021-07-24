@@ -45,6 +45,7 @@ func ExampleURLCountMap(filename string, contents string) []KeyValue {
 
 // ExampleURLCountReduce is the reduce function in the first round
 func ExampleURLCountReduce(key string, values []string) string {
+	//log.Printf("%s %s\n", key, strconv.Itoa(len(values)))
 	return fmt.Sprintf("%s %s\n", key, strconv.Itoa(len(values)))
 }
 
