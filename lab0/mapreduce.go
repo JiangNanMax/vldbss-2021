@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"container/list"
 	"encoding/json"
 	"hash/fnv"
 	"io/ioutil"
@@ -119,10 +118,10 @@ func (c *MRCluster) worker() {
 				// results formatted as what they want.
 				//panic("YOUR CODE HERE")
 
-				kvList := make(map[string]*list.List)
+				kvList := make(map[string][]string)
 				for i := 0; i < t.nMap; i++ {
 					rPath := reduceName(t.dataDir, t.jobName, i, t.taskNumber)
-					log.Printf("do reduce: read %s\n", rPath)
+					//log.Printf("do reduce: read %s\n", rPath)
 					content, err := os.Open(rPath)
 					if err != nil {
 						panic(err)
@@ -136,9 +135,9 @@ func (c *MRCluster) worker() {
 						}
 						_, ok := kvList[kv.Key]
 						if !ok {
-							kvList[kv.Key] = list.New()
+							kvList[kv.Key] = make([]string, 0)
 						}
-						kvList[kv.Key].PushBack(kv.Value)
+						kvList[kv.Key] = append(kvList[kv.Key], kv.Value)
 						//log.Printf("key: %s  value: %s\n", kv.Key, kv.Value)
 					}
 				}
@@ -151,15 +150,7 @@ func (c *MRCluster) worker() {
 				fs, bs := CreateFileAndBuf(mPath)
 				//enc := json.NewEncoder(bs)
 				for _, key := range keys {
-					cnt := kvList[key].Len()
-					kvs := make([]string, cnt)
-					var i = 0
-					for e := kvList[key].Front(); e != nil; e = e.Next() {
-						kvs[i] = e.Value.(string)
-						//log.Printf("%v\n", e.Value)
-						i++
-					}
-					res := t.reduceF(key, kvs)
+					res := t.reduceF(key, kvList[key])
 					//log.Println(res)
 					//enc.Encode(KeyValue{key, res})
 					bs.WriteString(res)
